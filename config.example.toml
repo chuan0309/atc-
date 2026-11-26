@@ -1,0 +1,60 @@
+# 複製成 config.toml 再改
+
+[gemini]
+api_key = ""                      # 也可以用環境變數 GEMINI_API_KEY
+brain_model = "gemini-2.5-flash"  # 負責聽懂你講話 + 決定 ATC 怎麼回
+tts_model = "gemini-2.5-flash-preview-tts"  # 負責把 ATC 的話念出來
+# 每個管制席位用不同聲音，聽起來比較像真的
+[gemini.voices]
+delivery = "Kore"
+ground = "Puck"
+tower = "Charon"
+departure = "Fenrir"
+center = "Orus"
+approach = "Aoede"
+
+[simbrief]
+username = ""     # 你的 SimBrief 帳號（或填 user_id）
+user_id = ""
+
+[sim]
+backend = "msfs"  # msfs = 真的接模擬器；mock = 沒開模擬器時測試用
+
+[gsx]
+enabled = true
+# ATC 准許推出後，自動幫你叫 GSX 推車
+auto_pushback = true
+# GSX 選單檔位置，留空會自動找
+menu_file = ""
+
+[ptt]
+# 鍵盤按鍵（按住講話）
+key = "caps lock"
+# 搖桿按鈕：填 joystick 編號跟按鈕編號，不用就設 -1
+joystick = -1
+button = -1
+
+[radio]
+radio_effect = true   # 加上無線電的沙沙濾波效果
+require_frequency = false  # true = COM1 要調到正確頻率 ATC 才會回你
+
+[traffic]
+# AI 交通（用 FSLTL 模型）：ATC 會指揮它們起降，也會跟你排順序
+enabled = true
+departures_per_hour = 20
+arrivals_per_hour = 20
+radio_chatter = true     # 聽得到 ATC 跟 AI 飛機講話（會多花 Gemini TTS 用量）
+# 留空會自動從 MSFS 的 UserCfg.opt 找 Community 資料夾
+community_path = ""
+# FSLTL 的模型對照表，留空會自動在 Community\fsltl-traffic-base 裡找 *.vmr
+vmr_file = ""
+# 你周圍空域的真實班表航班（只顯示，不指揮）
+enroute = true
+enroute_radius_nm = 40
+
+[schedule]
+# 真實班表來源，兩個可以同時用；都沒填就用隨機產生的航班
+# 1. AeroDataBox（RapidAPI 上申請，有免費方案）。也可以用環境變數 AERODATABOX_KEY
+aerodatabox_key = ""
+# 2. 自己的班表 CSV（格式見 schedule.example.csv）
+csv_file = ""

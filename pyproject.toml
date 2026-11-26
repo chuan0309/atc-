@@ -1,0 +1,29 @@
+[project]
+name = "gemini-atc"
+version = "0.1.0"
+description = "AI ATC for MSFS with Gemini voice, SimBrief and GSX Pro integration"
+requires-python = ">=3.10"
+dependencies = [
+  "google-genai>=1.0",
+  "numpy",
+  "requests",
+  "tomli; python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+# 只在 Windows + MSFS 上需要
+msfs = ["SimConnect>=0.4.26", "sounddevice", "keyboard", "pygame"]
+dev = ["pytest"]
+
+[project.scripts]
+gemini-atc = "atc.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
