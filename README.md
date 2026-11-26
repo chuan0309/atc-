@@ -5,6 +5,7 @@
 - 🎙️ **Gemini 語音**：按住 PTT 講話 → Gemini 聽懂你的無線電呼叫、檢查覆誦 → 用 Gemini TTS 念回來（每個席位不同聲音，還有無線電濾波效果）
 - 📋 **SimBrief**：自動抓你最新的 OFP（呼號、航路、SID/STAR、巡航高度、跑道）
 - 🚐 **GSX Pro**：讀 GSX 各項地勤狀態；ATC 准許推出時自動幫你叫 GSX 推車
+- 🛫 **FSLTL AI 交通**：用 FSLTL 的模型生出 AI 飛機，塔台會指揮它們 line up、起飛、落地、重飛，你在無線電裡聽得到；你要起飛/落地時 ATC 會照跑道狀況幫你排序（hold short、number 2、go around）
 - ✈️ **飛行階段自動判斷**：Delivery → Ground → Tower → Departure → Center → Approach → Tower → Ground，換階段時 ATC 會主動呼叫你（交接頻率、下降許可等）
 
 ## 怎麼運作（簡單版）
@@ -19,6 +20,19 @@
 ```
 
 模擬器資料是透過 SimConnect 讀的，GSX 是透過 `FSDT_GSX_*` 這些 L:var 溝通。
+
+## AI 交通（FSLTL）怎麼運作
+
+1. **找模型**：自動從 MSFS 的 `UserCfg.opt` 找 Community 資料夾，讀 `fsltl-traffic-base` 裡的 `*.vmr` 對照表（航空公司＋機型 → 模型名稱）；沒有 vmr 就直接掃 `aircraft.cfg`。
+2. **找跑道**：用 SimBrief 排的起降跑道，跑道座標從 OurAirports 公開資料抓（第一次會下載，存在 `~/.gemini-atc/`）。
+3. **生飛機**：用 SimConnect `AICreateNonATCAircraft` 生 FSLTL 模型，再把 MSFS 自己的 AI 控制凍結，位置由我們每 0.2 秒設定。
+4. **指揮**：
+   - 出發機：跑道頭旁等待 → line up and wait → cleared for takeoff → 爬升 → contact departure → 消失
+   - 到場機：10 海里五邊出現 → cleared to land → 落地滾行 → contact ground → 消失
+   - 跑道一次只給一架用（包括你）。你在 6 海里五邊內，或 ATC 已經給你起飛/落地許可，AI 都會讓你。跑道被擋住時，AI 到場機在 1 海里會被叫重飛。
+5. **跟你排序**：每次你呼叫 ATC，Gemini 都會拿到目前跑道/五邊上有誰，照這個決定要不要讓你等。
+
+AI 交通只在你目前的機場出現：出發階段在起飛機場，進場以後在目的地機場，巡航時不會有。找不到 FSLTL 模型時，AI 飛機不會出現在畫面上，可是無線電跟排序還是會照樣運作（等於「看不到的交通」）。
 
 ## 安裝（Windows）
 
@@ -58,6 +72,10 @@ python -m atc --mock --text --demo-plan
 | `src/atc/phases.py` | 判斷飛行階段、該跟哪個席位講話 |
 | `src/atc/brain.py` | Gemini ATC 大腦（prompt、記憶指派高度/squawk/頻率） |
 | `src/atc/voice/` | 錄音、PTT、Gemini TTS、無線電音效 |
+| `src/atc/traffic/fsltl.py` | 找 FSLTL 模型（vmr 對照表 / aircraft.cfg） |
+| `src/atc/traffic/runways.py` | 跑道資料（OurAirports） |
+| `src/atc/traffic/engine.py` | AI 交通引擎：起降流程、跑道佔用、無線電對話 |
+| `src/atc/radio_out.py` | 播放佇列（你的 ATC 優先，AI 對話排後面） |
 | `src/atc/app.py` | 把上面全部串起來 |
 
 ## 目前限制 / 還沒驗證的地方（老實說）
@@ -66,7 +84,10 @@ python -m atc --mock --text --demo-plan
 - **GSX 選單檔位置**不同版本不一樣，找不到時會用「主選單第 5 項 = Request Pushback」的預設值；不對的話在 `config.toml` 的 `gsx.menu_file` 手動指定。
 - 推出後 GSX 會再問方向等問題，目前要你自己在 GSX 選單點。
 - **頻率**是 Gemini 依機場自己編的（還沒接真實頻率資料庫），預設不強制你調 COM1（`require_frequency = false`）。
-- 沒有 AI 交通、沒有雷達隔離，ATC 不知道其他飛機。
+- AI 交通目前只有**跑道起降**：AI 不會從登機門推出、不會走滑行道（沒有機場滑行道資料），是直接出現在跑道頭旁等待/五邊上，脫離跑道後就消失。空中航路上也還沒有 AI。
+- AI 飛機的動作是我們自己算的簡化版（直線、固定下滑道），起落架、燈光還沒控制。
+- **SimConnect 生 AI 那段完全沒在真機上測過**，如果飛機沒出現或亂飄，開 `-v` 把 log 貼給我。
+- AI 對話也會用 Gemini TTS，交通多的話用量會增加；不想聽可以把 `traffic.radio_chatter` 關掉。
 - Gemini 模型名稱會更新，如果出錯就去 `config.toml` 換成最新的。
 
 ## 測試

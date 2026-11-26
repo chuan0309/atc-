@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 
 from .base import SimInterface, SimState
 
@@ -40,6 +42,8 @@ class MSFSSim(SimInterface):
         self.sm = None
         self.aq = None
         self._lvar_reqs: dict = {}
+        self._pos_def = None
+        self._events: dict = {}
 
     def connect(self) -> None:
         from SimConnect import AircraftRequests, SimConnect  # type: ignore
@@ -81,6 +85,73 @@ class MSFSSim(SimInterface):
             self._lvar(name).value = value
         except Exception as e:  # noqa: BLE001
             log.warning("寫 L:%s 失敗: %s", name, e)
+
+    # ---------- AI 飛機 ----------
+    # 用 AICreateNonATCAircraft 生 FSLTL 模型，凍結 MSFS 自己的 AI 控制，
+    # 之後每一步用 SetDataOnSimObject 直接設定位置（跟 BeyondATC / 交通注入器一樣的做法）。
+    def _event(self, name: str):
+        if name not in self._events:
+            self._events[name] = self.sm.map_to_sim_event(name.encode())
+        return self._events[name]
+
+    def spawn_ai(self, title, tail, lat, lon, alt_ft, hdg, on_ground, kt):
+        from ctypes.wintypes import DWORD
+        from SimConnect.Constants import SIMCONNECT_GROUP_PRIORITY_HIGHEST  # type: ignore
+        from SimConnect.Enum import SIMCONNECT_DATA_INITPOSITION  # type: ignore
+
+        init = SIMCONNECT_DATA_INITPOSITION(lat, lon, alt_ft, 0.0, 0.0, hdg, 1 if on_ground else 0, int(kt))
+        # Python-SimConnect 收到 ASSIGNED_OBJECT_ID 會寫進這個環境變數
+        os.environ.pop("SIMCONNECT_OBJECT_ID", None)
+        req = self.sm.new_request_id()
+        try:
+            self.sm.dll.AICreateNonATCAircraft(self.sm.hSimConnect, title.encode(), tail[:12].encode(), init, req.value)
+        except Exception as e:  # noqa: BLE001
+            log.warning("生 AI 失敗 (%s): %s", title, e)
+            return None
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            oid = os.environ.get("SIMCONNECT_OBJECT_ID")
+            if oid:
+                oid = int(oid)
+                for ev in ("FREEZE_LATITUDE_LONGITUDE_SET", "FREEZE_ALTITUDE_SET", "FREEZE_ATTITUDE_SET"):
+                    evt = self._event(ev)
+                    if evt is not None:
+                        self.sm.dll.TransmitClientEvent(self.sm.hSimConnect, oid, evt.value, DWORD(1),
+                                                        SIMCONNECT_GROUP_PRIORITY_HIGHEST, DWORD(16))
+                log.info("AI %s (%s) object id %d", tail, title, oid)
+                return oid
+            time.sleep(0.05)
+        log.warning("生 AI 沒回應（模型名稱可能不對）: %s", title)
+        return None
+
+    def _position_def(self):
+        if self._pos_def is None:
+            from SimConnect.Constants import SIMCONNECT_UNUSED  # type: ignore
+            from SimConnect.Enum import SIMCONNECT_DATATYPE  # type: ignore
+
+            self._pos_def = self.sm.new_def_id()
+            for name, unit in (("PLANE LATITUDE", "degrees"), ("PLANE LONGITUDE", "degrees"),
+                               ("PLANE ALTITUDE", "feet"), ("PLANE PITCH DEGREES", "degrees"),
+                               ("PLANE BANK DEGREES", "degrees"), ("PLANE HEADING DEGREES TRUE", "degrees")):
+                self.sm.dll.AddToDataDefinition(self.sm.hSimConnect, self._pos_def.value, name.encode(), unit.encode(),
+                                                SIMCONNECT_DATATYPE.SIMCONNECT_DATATYPE_FLOAT64, 0, SIMCONNECT_UNUSED)
+        return self._pos_def
+
+    def move_ai(self, object_id, lat, lon, alt_ft, pitch, bank, hdg):
+        from ctypes import c_double, c_void_p, cast, sizeof
+
+        d = self._position_def()
+        data = (c_double * 6)(lat, lon, alt_ft, -pitch, bank, hdg)  # MSFS pitch 正值 = 機頭朝下
+        try:
+            self.sm.dll.SetDataOnSimObject(self.sm.hSimConnect, d.value, object_id, 0, 0, sizeof(data), cast(data, c_void_p))
+        except Exception as e:  # noqa: BLE001
+            log.debug("移動 AI %s 失敗: %s", object_id, e)
+
+    def remove_ai(self, object_id):
+        try:
+            self.sm.dll.AIRemoveObject(self.sm.hSimConnect, object_id, self.sm.new_request_id().value)
+        except Exception as e:  # noqa: BLE001
+            log.debug("移除 AI %s 失敗: %s", object_id, e)
 
     def close(self) -> None:
         if self.sm:

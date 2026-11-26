@@ -160,3 +160,19 @@ def test_phase_change_triggers_atc_event():
     app.drain()
     assert app.tracker.phase == Phase.DEPARTURE
     assert any("contact departure" in l for l in out)
+
+
+def test_runway_clearance_reserves_runway():
+    from atc.traffic.engine import TrafficManager, TrafficSettings
+    from atc.traffic.fsltl import ModelLibrary
+    app, sim, models, out = _app([
+        {"pilot_transcript": "ready", "respond": True, "controller": "tower",
+         "atc_text": "EVA 25 runway 05L cleared for takeoff", "runway_clearance": "takeoff"},
+    ])
+    app.traffic = TrafficManager(sim, ModelLibrary([]), TrafficSettings(departures_per_hour=0, arrivals_per_hour=0))
+    app.submit_text("ready")
+    app.drain()
+    assert app.traffic.player_reservation == "takeoff"
+    # Gemini 有拿到交通狀況
+    ctx = models.calls[0][-1].parts[0].text
+    assert "AI TRAFFIC" in ctx

@@ -46,5 +46,17 @@ class SimInterface(ABC):
     @abstractmethod
     def set_lvar(self, name: str, value: float) -> None: ...
 
+    # ---- AI 飛機（FSLTL 模型）。不支援的 backend 回傳 None，交通照樣「虛擬」運作 ----
+    def spawn_ai(self, title: str, tail: str, lat: float, lon: float, alt_ft: float,
+                 hdg: float, on_ground: bool, kt: float) -> int | None:
+        return None
+
+    def move_ai(self, object_id: int, lat: float, lon: float, alt_ft: float,
+                pitch: float, bank: float, hdg: float) -> None:
+        pass
+
+    def remove_ai(self, object_id: int) -> None:
+        pass
+
     def close(self) -> None:
         pass

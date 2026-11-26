@@ -37,6 +37,12 @@ class Config:
     ptt_button: int = -1
     radio_effect: bool = True
     require_frequency: bool = False
+    traffic_enabled: bool = True
+    traffic_departures_per_hour: float = 20
+    traffic_arrivals_per_hour: float = 20
+    traffic_radio_chatter: bool = True
+    fsltl_community_path: str = ""
+    fsltl_vmr_file: str = ""
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":
@@ -66,4 +72,11 @@ class Config:
         r = data.get("radio", {})
         cfg.radio_effect = r.get("radio_effect", cfg.radio_effect)
         cfg.require_frequency = r.get("require_frequency", cfg.require_frequency)
+        t = data.get("traffic", {})
+        cfg.traffic_enabled = t.get("enabled", cfg.traffic_enabled)
+        cfg.traffic_departures_per_hour = float(t.get("departures_per_hour", cfg.traffic_departures_per_hour))
+        cfg.traffic_arrivals_per_hour = float(t.get("arrivals_per_hour", cfg.traffic_arrivals_per_hour))
+        cfg.traffic_radio_chatter = t.get("radio_chatter", cfg.traffic_radio_chatter)
+        cfg.fsltl_community_path = t.get("community_path", "")
+        cfg.fsltl_vmr_file = t.get("vmr_file", "")
         return cfg

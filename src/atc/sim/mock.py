@@ -29,6 +29,8 @@ class MockSim(SimInterface):
         self.state = SimState(com1_active_mhz=121.800)
         self.lvars: dict[str, float] = {}
         self.step = 0
+        self.ai: dict[int, dict] = {}
+        self._next_id = 1000
 
     def connect(self) -> None:
         pass
@@ -49,3 +51,14 @@ class MockSim(SimInterface):
         for k, v in changes.items():
             setattr(self.state, k, v)
         return label
+
+    def spawn_ai(self, title, tail, lat, lon, alt_ft, hdg, on_ground, kt):
+        self._next_id += 1
+        self.ai[self._next_id] = dict(title=title, tail=tail, lat=lat, lon=lon, alt=alt_ft, hdg=hdg)
+        return self._next_id
+
+    def move_ai(self, object_id, lat, lon, alt_ft, pitch, bank, hdg):
+        self.ai[object_id].update(lat=lat, lon=lon, alt=alt_ft, hdg=hdg)
+
+    def remove_ai(self, object_id):
+        self.ai.pop(object_id, None)

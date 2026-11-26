@@ -30,6 +30,9 @@ Rules:
 - If the pilot's transmission is unintelligible or not addressed to you, respond "Say again" style or set respond=false.
 - When handing off, give the next frequency and remember it. Invent realistic frequencies for the airports involved and stay consistent (see known_frequencies).
 - IFR clearance format (CRAFT): Cleared to <dest>, via <SID>/<route>, climb <initial alt>, expect <cruise> 10 minutes after departure, departure frequency, squawk.
+- AI TRAFFIC: a traffic picture of other aircraft at the active runway is provided. Use it to sequence the player realistically:
+  only one aircraft on the runway at a time; if the runway is occupied or an arrival is close, tell the player to hold short / line up and wait / continue (number 2, traffic to follow) / go around.
+  Mention relevant traffic ("traffic is an A321 on 4 mile final"). Never clear the player onto an occupied runway.
 - Be brief. One transmission at a time. Never explain things to the user out of character.
 - For system events (ATC-initiated calls such as handoffs, descent clearance, landing clearance, taxi after landing) produce the transmission a real controller would make at that moment; set respond=false if a real controller would stay silent.
 
@@ -47,7 +50,8 @@ Reply ONLY with a JSON object with these keys:
   "handoff_frequency_mhz": number|null, // frequency the pilot is told to contact
   "handoff_controller": string|null,
   "next_phase": "preflight|pushback|taxi_out|takeoff|departure|cruise|descent|approach|landing|taxi_in|parked"|null,
-  "approve_pushback": boolean           // true only in the transmission that approves pushback
+  "approve_pushback": boolean,          // true only in the transmission that approves pushback
+  "runway_clearance": "lineup|takeoff|landing"|null  // set when THIS transmission clears the player onto/for the runway
 }
 """
 
@@ -67,6 +71,7 @@ class ATCResponse:
     handoff_controller: str | None = None
     next_phase: str | None = None
     approve_pushback: bool = False
+    runway_clearance: str | None = None
 
     @classmethod
     def from_json(cls, text: str) -> "ATCResponse":
@@ -131,7 +136,7 @@ class ATCBrain:
         self.history: list = []
         self.max_history = max_history
 
-    def _context(self, phase: Phase, controller: str, sim_brief: str, gsx_status: str) -> str:
+    def _context(self, phase: Phase, controller: str, sim_brief: str, gsx_status: str, traffic: str = "none") -> str:
         return (
             f"FLIGHT PLAN: {self.plan.summary()}\n"
             f"Suggested initial climb: {self.plan.initial_altitude_ft} ft (adjust to realistic SID altitude if known).\n"
@@ -139,6 +144,7 @@ class ATCBrain:
             f"AIRCRAFT STATE: {sim_brief}\n"
             f"GSX GROUND SERVICES: {gsx_status}\n"
             f"ATC MEMORY: {self.memory.describe()}\n"
+            f"AI TRAFFIC:\n{traffic}\n"
         )
 
     def handle(
@@ -151,10 +157,11 @@ class ATCBrain:
         audio_wav: bytes | None = None,
         text: str | None = None,
         event: str | None = None,
+        traffic: str = "none",
     ) -> ATCResponse:
         from google.genai import types
 
-        ctx = self._context(phase, controller, sim_brief, gsx_status)
+        ctx = self._context(phase, controller, sim_brief, gsx_status, traffic)
         parts = [types.Part.from_text(text=ctx)]
         if event:
             parts.append(types.Part.from_text(text=f"SYSTEM EVENT (no pilot transmission): {event}"))

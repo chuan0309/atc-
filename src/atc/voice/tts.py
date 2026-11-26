@@ -17,11 +17,12 @@ class GeminiTTS:
         self.voices = voices
         self.radio_effect = radio_effect
 
-    def synthesize(self, text: str, controller: str) -> bytes:
+    def synthesize(self, text: str, controller: str = "", voice: str | None = None, pilot: bool = False) -> bytes:
         from google.genai import types
 
-        voice = self.voices.get(controller, "Kore")
-        prompt = f"Say in a calm, fast, professional air traffic controller radio voice: {text}"
+        voice = voice or self.voices.get(controller, "Kore")
+        who = "airline pilot" if pilot else "air traffic controller"
+        prompt = f"Say in a calm, fast, professional {who} radio voice: {text}"
         resp = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
@@ -39,10 +40,10 @@ class GeminiTTS:
             pcm = apply_radio_effect(pcm, TTS_SAMPLE_RATE)
         return pcm
 
-    def speak(self, text: str, controller: str) -> None:
+    def speak(self, text: str, controller: str = "", voice: str | None = None, pilot: bool = False) -> None:
         from .audio import play_pcm
 
         try:
-            play_pcm(self.synthesize(text, controller), TTS_SAMPLE_RATE)
+            play_pcm(self.synthesize(text, controller, voice, pilot), TTS_SAMPLE_RATE)
         except Exception as e:  # noqa: BLE001
             log.error("TTS 失敗（文字仍會顯示）: %s", e)

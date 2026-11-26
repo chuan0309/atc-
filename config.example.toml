@@ -37,3 +37,14 @@ button = -1
 [radio]
 radio_effect = true   # 加上無線電的沙沙濾波效果
 require_frequency = false  # true = COM1 要調到正確頻率 ATC 才會回你
+
+[traffic]
+# AI 交通（用 FSLTL 模型）：ATC 會指揮它們起降，也會跟你排順序
+enabled = true
+departures_per_hour = 20
+arrivals_per_hour = 20
+radio_chatter = true     # 聽得到 ATC 跟 AI 飛機講話（會多花 Gemini TTS 用量）
+# 留空會自動從 MSFS 的 UserCfg.opt 找 Community 資料夾
+community_path = ""
+# FSLTL 的模型對照表，留空會自動在 Community\fsltl-traffic-base 裡找 *.vmr
+vmr_file = ""

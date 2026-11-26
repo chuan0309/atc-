@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mock", action="store_true", help="不接模擬器，用假資料")
     ap.add_argument("--text", action="store_true", help="用打字代替語音")
     ap.add_argument("--no-tts", action="store_true", help="ATC 不出聲，只顯示文字")
+    ap.add_argument("--no-traffic", action="store_true", help="不要 AI 交通")
     ap.add_argument("--demo-plan", action="store_true", help="不抓 SimBrief，用內建範例航班")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
@@ -63,8 +64,29 @@ def main(argv: list[str] | None = None) -> int:
     brain = ATCBrain(cfg.api_key, cfg.brain_model, plan, client=client)
     tts = None if args.no_tts else GeminiTTS(client, cfg.tts_model, cfg.voices, cfg.radio_effect)
 
+    # 4. AI 交通（FSLTL）
+    traffic, runways = None, {}
+    if cfg.traffic_enabled and not args.no_traffic:
+        from .traffic.engine import TrafficManager, TrafficSettings
+        from .traffic.fsltl import ModelLibrary
+        from .traffic.runways import load_runways, pick_runway
+        lib = ModelLibrary.load(cfg.fsltl_community_path or None, cfg.fsltl_vmr_file or None)
+        if not len(lib) and cfg.sim_backend == "msfs":
+            print("找不到 FSLTL 模型：AI 飛機不會出現在畫面上，但無線電/排序照樣運作")
+        runways = {
+            "origin": pick_runway(load_runways(plan.origin.icao), plan.origin.runway),
+            "destination": pick_runway(load_runways(plan.destination.icao), plan.destination.runway),
+        }
+        traffic = TrafficManager(sim, lib, TrafficSettings(
+            departures_per_hour=cfg.traffic_departures_per_hour,
+            arrivals_per_hour=cfg.traffic_arrivals_per_hour,
+            radio_chatter=cfg.traffic_radio_chatter,
+        ))
+        for k, r in runways.items():
+            print(f"AI 交通跑道 ({k}): {r.airport} {r.ident}" if r else f"AI 交通跑道 ({k}): 找不到資料")
+
     from .app import ATCApp
-    app = ATCApp(cfg, sim, plan, brain, tts=tts)
+    app = ATCApp(cfg, sim, plan, brain, tts=tts, traffic=traffic, runways=runways)
 
     if args.text:
         threading.Thread(target=app.run_forever, daemon=True).start()
