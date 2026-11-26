@@ -43,6 +43,10 @@ class Config:
     traffic_radio_chatter: bool = True
     fsltl_community_path: str = ""
     fsltl_vmr_file: str = ""
+    traffic_enroute: bool = True
+    traffic_enroute_radius_nm: float = 40.0
+    schedule_aerodatabox_key: str = ""
+    schedule_csv: str = ""
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":
@@ -79,4 +83,9 @@ class Config:
         cfg.traffic_radio_chatter = t.get("radio_chatter", cfg.traffic_radio_chatter)
         cfg.fsltl_community_path = t.get("community_path", "")
         cfg.fsltl_vmr_file = t.get("vmr_file", "")
+        cfg.traffic_enroute = t.get("enroute", cfg.traffic_enroute)
+        cfg.traffic_enroute_radius_nm = float(t.get("enroute_radius_nm", cfg.traffic_enroute_radius_nm))
+        sc = data.get("schedule", {})
+        cfg.schedule_aerodatabox_key = sc.get("aerodatabox_key") or os.environ.get("AERODATABOX_KEY", "")
+        cfg.schedule_csv = sc.get("csv_file", "")
         return cfg

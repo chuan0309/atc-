@@ -11,14 +11,17 @@ from __future__ import annotations
 import itertools
 import logging
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Callable
 
 from ..sim.base import SimInterface, SimState
 from .airlines import radio_callsign
 from .fsltl import Model, ModelLibrary
 from .geo import along_cross_nm, destination
 from .runways import Runway
+from .schedule import Schedule, ScheduledFlight
 from .speech import say_callsign, say_runway
 
 log = logging.getLogger(__name__)
@@ -79,12 +82,18 @@ class TrafficSettings:
     min_arrival_spacing_nm: float = 4.0
     departure_interval_s: float = 90.0
     radio_chatter: bool = True
+    # 真實班表：出發機在表定起飛後幾分鐘出現在跑道頭（假裝滑行時間），到場機在表定落地前幾分鐘出現在五邊
+    taxi_out_min: float = 8.0
+    departure_window_min: float = 20.0
+    arrival_lead_min: float = 4.0
+    arrival_window_min: float = 6.0
     prefer_types: tuple[str, ...] = ("A320", "A321", "B738", "A333", "B77W", "A359", "B789", "A20N", "A21N", "B38M")
 
 
 class TrafficManager:
     def __init__(self, sim: SimInterface, library: ModelLibrary, settings: TrafficSettings | None = None,
-                 rng: random.Random | None = None):
+                 rng: random.Random | None = None, schedule: Schedule | None = None,
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.sim = sim
         self.lib = library
         self.s = settings or TrafficSettings()
@@ -95,6 +104,9 @@ class TrafficManager:
         self.player_reservation: str | None = None   # "takeoff" / "landing"
         self._since_departure = 1e9
         self._numbers = itertools.count(self.rng.randint(100, 800))
+        self.schedule = schedule
+        self.clock = clock
+        self._used: set[str] = set()   # 已經生過的班表航班
 
     # ---------- 設定 ----------
     def set_runway(self, rwy: Runway | None) -> None:
@@ -111,11 +123,16 @@ class TrafficManager:
         self.aircraft = []
 
     # ---------- 生飛機 ----------
-    def _new_identity(self) -> tuple[str, str, Model | None]:
+    def _new_identity(self, flight: ScheduledFlight | None = None) -> tuple[str, str, Model | None, str]:
+        if flight:
+            m = self.lib.match(flight.airline, flight.type_code) if len(self.lib) and flight.type_code else None
+            if m is None and len(self.lib):
+                m = self.lib.random_airline_model((flight.type_code,)) if flight.type_code else None
+            return flight.callsign, radio_callsign(flight.airline, flight.number), m, flight.type_code
         m = self.lib.random_airline_model(self.s.prefer_types) if len(self.lib) else None
         airline = m.airline if m else self.rng.choice(["CAL", "EVA", "TTW", "SJX", "CPA", "JAL", "ANA", "KAL"])
         num = str(next(self._numbers))
-        return f"{airline}{num}", radio_callsign(airline, num), m
+        return f"{airline}{num}", radio_callsign(airline, num), m, ""
 
     def _spawn_sim(self, a: AIAircraft, on_ground: bool) -> None:
         if a.title:
@@ -126,30 +143,30 @@ class TrafficManager:
             self.sim.remove_ai(a.object_id)
             a.object_id = None
 
-    def spawn_departure(self) -> AIAircraft | None:
+    def spawn_departure(self, flight: ScheduledFlight | None = None) -> AIAircraft | None:
         r = self.runway
         if not r:
             return None
-        cs, radio, m = self._new_identity()
+        cs, radio, m, tc = self._new_identity(flight)
         n_holding = sum(1 for a in self.aircraft if a.state == AIState.HOLDING_SHORT)
         # 停在跑道頭右邊約 120 米，排隊的往後排
         base = destination(r.lat, r.lon, r.heading_true, 0.03 + 0.05 * n_holding)
         lat, lon = destination(*base, (r.heading_true + 90) % 360, 0.065)
-        a = AIAircraft(cs, radio, m.type_code if m else "A320", m.title if m else "", False,
+        a = AIAircraft(cs, radio, tc or (m.type_code if m else "A320"), m.title if m else "", False,
                        AIState.HOLDING_SHORT, lat, lon, r.elevation_ft, (r.heading_true - 90) % 360)
         self._spawn_sim(a, True)
         self.aircraft.append(a)
         self._say("pilot", "tower", f"Tower, {a.spoken}, holding short runway {say_runway(r.ident)}, ready for departure.", a)
         return a
 
-    def spawn_arrival(self, dist_nm: float | None = None) -> AIAircraft | None:
+    def spawn_arrival(self, dist_nm: float | None = None, flight: ScheduledFlight | None = None) -> AIAircraft | None:
         r = self.runway
         if not r:
             return None
         d = dist_nm or self.s.spawn_final_nm
-        cs, radio, m = self._new_identity()
+        cs, radio, m, tc = self._new_identity(flight)
         lat, lon = destination(r.lat, r.lon, (r.heading_true + 180) % 360, d)
-        a = AIAircraft(cs, radio, m.type_code if m else "A320", m.title if m else "", True,
+        a = AIAircraft(cs, radio, tc or (m.type_code if m else "A320"), m.title if m else "", True,
                        AIState.FINAL, lat, lon, r.elevation_ft + d * GLIDE_FT_PER_NM + 50, r.heading_true,
                        speed_kt=150, pitch=2.5)
         self._spawn_sim(a, False)
@@ -212,18 +229,49 @@ class TrafficManager:
             elif a.object_id is not None:
                 self.sim.move_ai(a.object_id, a.lat, a.lon, a.alt_ft, a.pitch, 0.0, a.hdg)
 
+    def _arrival_spacing_ok(self, p: SimState) -> bool:
+        others = [self._arrival_dist(a) for a in self.aircraft if a.arrival and a.state == AIState.FINAL]
+        pf = self.player_final_nm(p)
+        if pf is not None:
+            others.append(pf)
+        return all(abs(self.s.spawn_final_nm - d) >= self.s.min_arrival_spacing_nm for d in others)
+
+    def _spawn_from_schedule(self, p: SimState) -> None:
+        s, now, icao = self.s, self.clock(), self.runway.airport
+        holding = sum(1 for a in self.aircraft if a.state == AIState.HOLDING_SHORT)
+        for f in self.schedule.departures(icao):
+            if holding >= s.max_holding:
+                break
+            start = f.dep_utc + timedelta(minutes=s.taxi_out_min)
+            if f.key in self._used or not (start <= now <= start + timedelta(minutes=s.departure_window_min)):
+                continue
+            self._used.add(f.key)
+            self.spawn_departure(flight=f)
+            holding += 1
+        arrivals = sum(1 for a in self.aircraft if a.arrival and a.state == AIState.FINAL)
+        for f in self.schedule.arrivals(icao):
+            if arrivals >= s.max_arrivals:
+                break
+            start = f.arr_utc - timedelta(minutes=s.arrival_lead_min)
+            if f.key in self._used or not (start <= now <= start + timedelta(minutes=s.arrival_window_min)):
+                continue
+            if not self._arrival_spacing_ok(p):
+                break  # 等前面的飛近一點再放下一架
+            self._used.add(f.key)
+            self.spawn_arrival(flight=f)
+            arrivals += 1
+
     def _maybe_spawn(self, p: SimState, dt: float) -> None:
+        if self.schedule is not None and len(self.schedule):
+            self._spawn_from_schedule(p)
+            return
         s = self.s
         holding = sum(1 for a in self.aircraft if a.state == AIState.HOLDING_SHORT)
         if holding < s.max_holding and self.rng.random() < s.departures_per_hour / 3600 * dt:
             self.spawn_departure()
         arrivals = [a for a in self.aircraft if a.arrival and a.state == AIState.FINAL]
         if len(arrivals) < s.max_arrivals and self.rng.random() < s.arrivals_per_hour / 3600 * dt:
-            others = [self._arrival_dist(a) for a in arrivals]
-            pf = self.player_final_nm(p)
-            if pf is not None:
-                others.append(pf)
-            if all(abs(s.spawn_final_nm - d) >= s.min_arrival_spacing_nm for d in others):
+            if self._arrival_spacing_ok(p):
                 self.spawn_arrival()
 
     def _can_depart(self, a: AIAircraft, p: SimState) -> bool:

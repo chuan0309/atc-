@@ -48,3 +48,13 @@ radio_chatter = true     # 聽得到 ATC 跟 AI 飛機講話（會多花 Gemini 
 community_path = ""
 # FSLTL 的模型對照表，留空會自動在 Community\fsltl-traffic-base 裡找 *.vmr
 vmr_file = ""
+# 你周圍空域的真實班表航班（只顯示，不指揮）
+enroute = true
+enroute_radius_nm = 40
+
+[schedule]
+# 真實班表來源，兩個可以同時用；都沒填就用隨機產生的航班
+# 1. AeroDataBox（RapidAPI 上申請，有免費方案）。也可以用環境變數 AERODATABOX_KEY
+aerodatabox_key = ""
+# 2. 自己的班表 CSV（格式見 schedule.example.csv）
+csv_file = ""

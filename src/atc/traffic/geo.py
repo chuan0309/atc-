@@ -36,3 +36,17 @@ def along_cross_nm(lat, lon, ref_lat, ref_lon, course_deg) -> tuple[float, float
         return 0.0, 0.0
     ang = math.radians(bearing_deg(ref_lat, ref_lon, lat, lon) - course_deg)
     return d * math.cos(ang), d * math.sin(ang)
+
+
+def intermediate(lat1, lon1, lat2, lon2, frac: float) -> tuple[float, float]:
+    """大圓航線上從 1 走到 2 的 frac（0~1）位置。"""
+    p1, l1, p2, l2 = map(math.radians, (lat1, lon1, lat2, lon2))
+    d = distance_nm(lat1, lon1, lat2, lon2) / R_NM
+    if d < 1e-9:
+        return lat1, lon1
+    a = math.sin((1 - frac) * d) / math.sin(d)
+    b = math.sin(frac * d) / math.sin(d)
+    x = a * math.cos(p1) * math.cos(l1) + b * math.cos(p2) * math.cos(l2)
+    y = a * math.cos(p1) * math.sin(l1) + b * math.cos(p2) * math.sin(l2)
+    z = a * math.sin(p1) + b * math.sin(p2)
+    return math.degrees(math.atan2(z, math.hypot(x, y))), math.degrees(math.atan2(y, x))

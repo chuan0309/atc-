@@ -65,8 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     tts = None if args.no_tts else GeminiTTS(client, cfg.tts_model, cfg.voices, cfg.radio_effect)
 
     # 4. AI 交通（FSLTL）
-    traffic, runways = None, {}
+    traffic, runways, enroute = None, {}, None
     if cfg.traffic_enabled and not args.no_traffic:
+        from .traffic.schedule import load_schedule
+        schedule = load_schedule(cfg, [plan.origin.icao, plan.destination.icao])
+        print(f"真實班表: {len(schedule)} 班" if len(schedule) else "沒有班表：AI 交通用隨機產生的航班")
         from .traffic.engine import TrafficManager, TrafficSettings
         from .traffic.fsltl import ModelLibrary
         from .traffic.runways import load_runways, pick_runway
@@ -81,12 +84,16 @@ def main(argv: list[str] | None = None) -> int:
             departures_per_hour=cfg.traffic_departures_per_hour,
             arrivals_per_hour=cfg.traffic_arrivals_per_hour,
             radio_chatter=cfg.traffic_radio_chatter,
-        ))
+        ), schedule=schedule)
+        if cfg.traffic_enroute and len(schedule):
+            from .traffic.airports import load_airports
+            from .traffic.enroute import EnrouteTraffic
+            enroute = EnrouteTraffic(sim, lib, schedule, load_airports(), cfg.traffic_enroute_radius_nm)
         for k, r in runways.items():
             print(f"AI 交通跑道 ({k}): {r.airport} {r.ident}" if r else f"AI 交通跑道 ({k}): 找不到資料")
 
     from .app import ATCApp
-    app = ATCApp(cfg, sim, plan, brain, tts=tts, traffic=traffic, runways=runways)
+    app = ATCApp(cfg, sim, plan, brain, tts=tts, traffic=traffic, runways=runways, enroute=enroute)
 
     if args.text:
         threading.Thread(target=app.run_forever, daemon=True).start()

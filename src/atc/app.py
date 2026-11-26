@@ -40,7 +40,7 @@ class Transmission:
 
 class ATCApp:
     def __init__(self, cfg: Config, sim: SimInterface, plan: FlightPlan, brain: ATCBrain,
-                 tts=None, printer=print, traffic=None, runways: dict | None = None):
+                 tts=None, printer=print, traffic=None, runways: dict | None = None, enroute=None):
         self.cfg = cfg
         self.sim = sim
         self.plan = plan
@@ -55,6 +55,7 @@ class ATCApp:
         self.tracker = PhaseTracker(plan.cruise_altitude_ft, plan.destination.elevation_ft)
         self.traffic = traffic             # TrafficManager 或 None
         self.runways = runways or {}       # {"origin": Runway, "destination": Runway}
+        self.enroute = enroute             # EnrouteTraffic 或 None
         self.queue: "queue.Queue[Transmission]" = queue.Queue()
         self.running = False
         self._busy = threading.Lock()
@@ -82,6 +83,8 @@ class ATCApp:
             return None
         state = self.sim.get_state()
         traffic = self.traffic.summary(state) if self.traffic else "no AI traffic"
+        if self.enroute:
+            traffic = "\n".join(x for x in (traffic, self.enroute.summary(state)) if x)
         with self._busy:
             try:
                 r = self.brain.handle(
@@ -149,6 +152,8 @@ class ATCApp:
                 self.print(f"  ({who}: {call.text})")
                 if self.radio:
                     self.radio.say_ai(call.speaker, call.controller, call.text, call.callsign)
+        if self.enroute and slow:
+            self.enroute.update(state, dt)
 
     def drain(self) -> None:
         while True:
@@ -184,3 +189,5 @@ class ATCApp:
             time.sleep(tick_s)
         if self.traffic:
             self.traffic.clear()
+        if self.enroute:
+            self.enroute.clear()
